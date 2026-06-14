@@ -393,7 +393,7 @@ function extract(r){
   return {
     price:m.regularMarketPrice, prevClose:m.previousClose ?? m.chartPreviousClose,
     high52:m.fiftyTwoWeekHigh, low52:m.fiftyTwoWeekLow,
-    avgVol:m.averageDailyVolume3Month, state:m.marketState,
+    currency:m.currency, avgVol:m.averageDailyVolume3Month, state:m.marketState,
     ts, open:q.open||[], hi:q.high||[], lo:q.low||[], close:q.close||[], vol:q.volume||[]
   };
 }
@@ -442,7 +442,7 @@ async function fetchInstrument(row){
   out.prevClose=meta.prevClose;
   out.high52=meta.high52;out.low52=meta.low52;
   out.avgVol=meta.avgVol;out.state=meta.state;
-  out.currency=row.currency;
+  out.currency=meta.currency||row.currency;   // valuta reale riportata da Yahoo
   return out;
 }
 
@@ -500,8 +500,14 @@ async function refreshPrices(force){
 /* =========================================================================
    DERIVED METRICS per instrument
    ========================================================================= */
-function eurPrice(d,p){const v=p??d.price;if(v==null)return null;return d.currency==='USD'?v/eurusd:(d.currency==='GBP'?v*1.17/eurusd:v)}
-// (GBP rough -> EUR; primary target is EUR/USD positions)
+function eurPrice(d,p){
+  const v=p??d.price;if(v==null)return null;
+  const c=d.currency||'EUR';
+  if(c==='USD')return v/eurusd;
+  if(c==='GBp'||c==='GBX')return (v/100)*1.17/eurusd; // pence -> EUR
+  if(c==='GBP')return v*1.17/eurusd;                  // sterline -> EUR
+  return v;                                           // EUR o altra valuta locale
+}
 
 function metrics(d){
   const row=d.row;
