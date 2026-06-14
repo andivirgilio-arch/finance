@@ -1,0 +1,27 @@
+{
+  "name": "ADV Portafoglio",
+  "short_name": "ADV",
+  "description": "Tracker investimenti mobile-first con prezzi real-time e indicatori tecnici.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0D1117",
+  "theme_color": "#0D1117",
+  "lang": "it",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230D1117'/%3E%3Cpath d='M40 130 L78 92 L104 116 L150 64' stroke='%2358A6FF' stroke-width='12' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='150' cy='64' r='10' fill='%233FB950'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='106' fill='%230D1117'/%3E%3Cpath d='M106 346 L208 244 L276 308 L400 170' stroke='%2358A6FF' stroke-width='32' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='400' cy='170' r='26' fill='%233FB950'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
