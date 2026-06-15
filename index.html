@@ -392,7 +392,7 @@ function weeklyReturns(closes){const r=[];for(let i=1;i<closes.length;i++){if(cl
 async function yfChart(ticker,range){
   const q=RANGES[range];
   const u=`${Y}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${q.interval}&range=${q.range}`;
-  const res=await fetch(PROXY+encodeURIComponent(u));
+  const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+Date.now());
   if(!res.ok)throw new Error('HTTP '+res.status);
   const j=await res.json();
   const r=j.chart?.result?.[0];
@@ -414,7 +414,7 @@ function extract(r){
 async function fetchEurUsd(){
   try{
     const u=`${Y}/v8/finance/chart/EURUSD=X?interval=1d&range=5d`;
-    const res=await fetch(PROXY+encodeURIComponent(u));
+    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+Date.now());
     const j=await res.json();
     const p=j.chart?.result?.[0]?.meta?.regularMarketPrice;
     if(p)eurusd=p;
@@ -531,7 +531,7 @@ async function refreshQuotes(){
   const u=`${Y}/v7/finance/spark?symbols=${syms}&range=1d&interval=5m`;
   let j;
   try{
-    const res=await fetch(PROXY+encodeURIComponent(u));
+    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+Date.now());
     if(!res.ok)throw new Error('HTTP '+res.status);
     j=await res.json();
   }catch(e){return}
