@@ -389,15 +389,34 @@ function weeklyReturns(closes){const r=[];for(let i=1;i<closes.length;i++){if(cl
 /* =========================================================================
    DATA FETCH
    ========================================================================= */
-async function yfChart(ticker,range){
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Anti-cache a finestre di 15s: dati freschi senza martellare il proxy.
+const cb=()=>Math.floor(Date.now()/15000);
+// Esegue fn sugli items con al massimo `limit` richieste in parallelo.
+async function mapLimit(items,limit,fn){
+  const res=[];let i=0;
+  const workers=Array.from({length:Math.min(limit,items.length)},async()=>{
+    while(i<items.length){const idx=i++;
+      try{res[idx]={status:'fulfilled',value:await fn(items[idx])}}
+      catch(e){res[idx]={status:'rejected',reason:e}}}
+  });
+  await Promise.all(workers);
+  return res;
+}
+async function yfChart(ticker,range,retry=1){
   const q=RANGES[range];
   const u=`${Y}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${q.interval}&range=${q.range}`;
-  const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+Date.now());
-  if(!res.ok)throw new Error('HTTP '+res.status);
-  const j=await res.json();
-  const r=j.chart?.result?.[0];
-  if(!r)throw new Error('no data');
-  return r;
+  try{
+    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+cb());
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const j=await res.json();
+    const r=j.chart?.result?.[0];
+    if(!r)throw new Error('no data');
+    return r;
+  }catch(e){
+    if(retry>0){await sleep(500);return yfChart(ticker,range,retry-1)}
+    throw e;
+  }
 }
 function extract(r){
   const m=r.meta||{};
@@ -414,7 +433,7 @@ function extract(r){
 async function fetchEurUsd(){
   try{
     const u=`${Y}/v8/finance/chart/EURUSD=X?interval=1d&range=5d`;
-    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+Date.now());
+    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+cb());
     const j=await res.json();
     const p=j.chart?.result?.[0]?.meta?.regularMarketPrice;
     if(p)eurusd=p;
@@ -502,7 +521,7 @@ function showBanner(show){$('#warnBanner').classList.toggle('hidden',!show)}
 async function refreshPrices(force){
   if(!portfolio.length)return;
   await fetchEurUsd();
-  const results=await Promise.allSettled(portfolio.map(fetchInstrument));
+  const results=await mapLimit(portfolio,4,fetchInstrument);
   const cache=loadJSON(LS.prices,{});
   priceData={};
   results.forEach((r,i)=>{
@@ -531,7 +550,7 @@ async function refreshQuotes(){
   const u=`${Y}/v7/finance/spark?symbols=${syms}&range=1d&interval=5m`;
   let j;
   try{
-    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+Date.now());
+    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+cb());
     if(!res.ok)throw new Error('HTTP '+res.status);
     j=await res.json();
   }catch(e){return}
@@ -831,7 +850,7 @@ function lastIdxLE(arr,t){ // ultimo indice con arr[idx] <= t (ricerca binaria)
 }
 async function portfolioPerfSeries(period){
   const stats=portfolioStats();
-  const fetched=await Promise.allSettled(portfolio.map(r=>yfChart(r.ticker_yf,period)));
+  const fetched=await mapLimit(portfolio,4,r=>yfChart(r.ticker_yf,period));
   const series=[];let wsum=0;
   fetched.forEach((res,i)=>{
     const row=portfolio[i];
