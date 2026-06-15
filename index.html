@@ -201,6 +201,7 @@ small{font-size:11.5px}
   <!-- PORTFOLIO -->
   <main id="view-portfolio">
     <div id="summaryCard"></div>
+    <div id="perfCard"></div>
     <div id="gaugeCard"></div>
     <div id="varCard"></div>
     <div class="sortbar" id="sortbar">
@@ -283,6 +284,7 @@ const Y = 'https://query1.finance.yahoo.com';
 const RANGES = {
   '1G':{interval:'5m',range:'1d'}, '1S':{interval:'1h',range:'5d'},
   '1M':{interval:'1d',range:'1mo'}, '3M':{interval:'1d',range:'3mo'},
+  '6M':{interval:'1d',range:'6mo'},
   '1A':{interval:'1wk',range:'1y'}, '5A':{interval:'1mo',range:'5y'}
 };
 const REFRESH_MS = 30*60*1000;
@@ -505,6 +507,7 @@ async function refreshPrices(force){
   saveJSON(LS.prices,cache);
   localStorage.setItem(LS.pricesTs,Date.now());
   renderAll();
+  if(force){perfState.cache={};if($('#perfCard')?.dataset.built)drawPerfChart(perfState.period)}
 }
 
 /* =========================================================================
@@ -702,7 +705,7 @@ function fearGreed(){
    ========================================================================= */
 function renderAll(){
   renderSummary();renderGauge();renderVar();renderInstruments();
-  renderSignals();renderAlerts();renderSettings();updateMarketDot();
+  renderSignals();renderAlerts();renderSettings();updateMarketDot();ensurePerfShell();
 }
 
 function updateMarketDot(){
@@ -775,6 +778,96 @@ function renderVar(){
       </div>
       <small class="muted">Value at Risk · perdita massima giornaliera attesa al 95% di confidenza</small>
     </div>`;
+}
+
+/* ---------- Andamento patrimonio (grafico ponderato) ---------- */
+function lastIdxLE(arr,t){ // ultimo indice con arr[idx] <= t (ricerca binaria)
+  let lo=0,hi=arr.length-1,res=-1;
+  while(lo<=hi){const mid=(lo+hi)>>1;if(arr[mid]<=t){res=mid;lo=mid+1}else hi=mid-1}
+  return res;
+}
+async function portfolioPerfSeries(period){
+  const stats=portfolioStats();
+  const fetched=await Promise.allSettled(portfolio.map(r=>yfChart(r.ticker_yf,period)));
+  const series=[];let wsum=0;
+  fetched.forEach((res,i)=>{
+    const row=portfolio[i];
+    const pos=stats.positions.find(p=>p.row.ticker_yf===row.ticker_yf);
+    const val=pos?pos.value:0;
+    if(res.status!=='fulfilled'||!val)return;
+    const e=extract(res.value);const ts=[],cl=[];
+    for(let k=0;k<e.ts.length;k++){if(e.close[k]!=null){ts.push(e.ts[k]);cl.push(e.close[k])}}
+    if(cl.length<2)return;
+    series.push({weight:val,ts,close:cl});wsum+=val;
+  });
+  if(!series.length)return null;
+  series.forEach(s=>s.weight/=wsum);
+  // timeline di riferimento = serie con più punti
+  let ref=series[0];series.forEach(s=>{if(s.ts.length>ref.ts.length)ref=s});
+  const refTs=ref.ts;const out=[];
+  for(let r=0;r<refTs.length;r++){
+    const t=refTs[r];let pct=0;
+    for(const s of series){
+      let idx=lastIdxLE(s.ts,t);if(idx<0)idx=0;
+      const norm=s.close[idx]/s.close[0]-1;
+      pct+=s.weight*norm;
+    }
+    out.push(pct*100);
+  }
+  return {labels:refTs.map(t=>new Date(t*1000)),data:out};
+}
+function ensurePerfShell(){
+  const host=$('#perfCard');if(!host)return;
+  if(host.dataset.built){if(!perfState.chart)drawPerfChart(perfState.period);return}
+  host.dataset.built='1';
+  host.innerHTML=`
+    <div class="card">
+      <div class="row">
+        <div class="label">Andamento patrimonio</div>
+        <div id="perfHeadline" style="font-weight:700">…</div>
+      </div>
+      <div class="period-tabs" id="perfTabs">
+        ${Object.keys(RANGES).map(p=>`<button data-p="${p}" class="${p===perfState.period?'active':''}">${p}</button>`).join('')}
+      </div>
+      <div style="position:relative;height:180px"><canvas id="perfChart"></canvas></div>
+      <small class="muted" id="perfNote">Variazione ponderata del portafoglio nel periodo</small>
+    </div>`;
+  $$('#perfTabs button').forEach(b=>b.onclick=()=>{
+    perfState.period=b.dataset.p;
+    $$('#perfTabs button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    drawPerfChart(perfState.period);
+  });
+  drawPerfChart(perfState.period);
+}
+async function drawPerfChart(period){
+  const canvas=$('#perfChart');if(!canvas)return;
+  const headline=$('#perfHeadline'),note=$('#perfNote');
+  let series=perfState.cache[period];
+  if(!series){
+    headline.textContent='…';if(note)note.textContent='Calcolo in corso…';
+    try{series=await portfolioPerfSeries(period)}catch(e){series=null}
+    if(series)perfState.cache[period]=series;
+  }
+  if(!series){if(note)note.textContent='Dati non disponibili';headline.textContent='—';return}
+  const data=series.data,end=data[data.length-1];
+  const up=end>=0,col=up?getCSS('--pos'):getCSS('--neg');
+  headline.textContent=fmtPct(end);headline.className=up?'pos':'neg';headline.style.fontWeight='700';
+  if(note)note.textContent='Variazione ponderata del portafoglio nel periodo';
+  if(perfState.chart)perfState.chart.destroy();
+  const ctx=canvas.getContext('2d');
+  const grad=ctx.createLinearGradient(0,0,0,180);
+  grad.addColorStop(0,hexA(col,.28));grad.addColorStop(1,hexA(col,0));
+  perfState.chart=new Chart(ctx,{
+    type:'line',
+    data:{labels:series.labels,datasets:[{data,borderColor:col,backgroundColor:grad,borderWidth:2,pointRadius:0,fill:true,tension:.25}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      interaction:{intersect:false,mode:'index'},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtPct(c.parsed.y)}}},
+      scales:{x:{display:false},
+        y:{position:'right',grid:{color:hexA(getCSS('--muted'),.12)},ticks:{color:getCSS('--muted'),font:{size:10},callback:v=>fmtNum(v,1)+'%'}}}
+    }
+  });
 }
 
 function instSorted(){
@@ -880,6 +973,7 @@ function renderSettings(){
    DETAIL VIEW
    ========================================================================= */
 let detailState={ticker:null,period:'3M',sma:false,ema:false,boll:false,chart:null};
+let perfState={period:'1M',chart:null,cache:{}};
 
 function openDetail(ticker){
   detailState.ticker=ticker;detailState.period='3M';
