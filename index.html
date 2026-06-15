@@ -438,6 +438,7 @@ async function fetchInstrument(row){
     out.atr=atr(e.hi.filter(v=>v!=null),e.lo.filter(v=>v!=null),closes,14);
     out.ema20=lastDefined(ema(closes,20));
     out.closes3=closes;
+    out.todayOpen=lastDefined(e.open);   // apertura della seduta odierna (baseline 1G intraday)
   }
   if(y1.status==='fulfilled'){
     const e=extract(y1.value);if(!meta)meta=e;
@@ -570,7 +571,9 @@ function metrics(d){
   const invested=avg*row.shares;
   const pl=value!=null?value-invested:null;
   const plpct=invested?(pl/invested)*100:null;
-  const daily=(d.price!=null&&d.prevClose)?((d.price-d.prevClose)/d.prevClose)*100:null;
+  // 1G = variazione intraday dall'apertura della seduta odierna; fallback alla chiusura prec.
+  const dBase=(d.todayOpen!=null)?d.todayOpen:d.prevClose;
+  const daily=(d.price!=null&&dBase)?((d.price-dBase)/dBase)*100:null;
 
   // 52w position
   let pos52=null,distLow=null,distHigh=null;
