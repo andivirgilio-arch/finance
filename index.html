@@ -391,7 +391,7 @@ function extract(r){
   const ts=r.timestamp||[];
   const q=(r.indicators?.quote?.[0])||{};
   return {
-    price:m.regularMarketPrice, prevClose:m.previousClose ?? m.chartPreviousClose,
+    price:m.regularMarketPrice, prevClose:m.previousClose ?? null, chartPrev:m.chartPreviousClose,
     high52:m.fiftyTwoWeekHigh, low52:m.fiftyTwoWeekLow,
     currency:m.currency, avgVol:m.averageDailyVolume3Month, state:m.marketState,
     ts, open:q.open||[], hi:q.high||[], lo:q.low||[], close:q.close||[], vol:q.volume||[]
@@ -439,7 +439,17 @@ async function fetchInstrument(row){
   if(!meta){out.failed=true;return out;}
 
   out.price=meta.price;
-  out.prevClose=meta.prevClose;
+  // Chiusura precedente robusta: se Yahoo non dà previousClose, usa l'ultima
+  // chiusura giornaliera (NON chartPreviousClose, che a 3 mesi sarebbe 3 mesi fa).
+  let pc=meta.prevClose;
+  const dc=out.closes3;
+  if(pc==null && dc && dc.length>=2){
+    const last=dc[dc.length-1];
+    if(meta.price!=null && Math.abs(meta.price-last)/meta.price<0.005) pc=dc[dc.length-2];
+    else pc=last;
+  }
+  if(pc==null) pc=meta.chartPrev;
+  out.prevClose=pc;
   out.high52=meta.high52;out.low52=meta.low52;
   out.avgVol=meta.avgVol;out.state=meta.state;
   out.currency=meta.currency||row.currency;   // valuta reale riportata da Yahoo

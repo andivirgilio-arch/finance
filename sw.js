@@ -1,7 +1,7 @@
 /* ADV Portafoglio — Service Worker
  * Cache-first per gli asset statici, network-first per le API esterne.
  */
-const CACHE = 'adv-portafoglio-v2';
+const CACHE = 'adv-portafoglio-v3';
 const STATIC_ASSETS = [
   './',
   './index.html',
