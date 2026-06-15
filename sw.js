@@ -1,7 +1,7 @@
 /* ADV Portafoglio — Service Worker
  * Cache-first per gli asset statici, network-first per le API esterne.
  */
-const CACHE = 'adv-portafoglio-v6';
+const CACHE = 'adv-portafoglio-v7';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -26,7 +26,8 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  const url = event.request.url;
+  const req = event.request;
+  const url = req.url;
 
   // Non intercettare le chiamate dati (Yahoo / proxy / Apps Script): vanno sempre in rete.
   if (
@@ -39,15 +40,34 @@ self.addEventListener('fetch', (event) => {
     return; // lascia gestire al browser
   }
 
-  // Cache-first per asset statici
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
+  const accept = req.headers.get('accept') || '';
+  const isHTML = req.mode === 'navigate' || accept.includes('text/html');
+
+  if (isHTML) {
+    // NETWORK-FIRST per l'HTML: l'app è sempre aggiornata; offline usa la cache.
+    event.respondWith(
+      fetch(req)
         .then((resp) => {
-          if (resp && resp.status === 200 && event.request.method === 'GET') {
+          if (resp && resp.status === 200) {
             const clone = resp.clone();
-            caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+            caches.open(CACHE).then((cache) => cache.put(req, clone));
+          }
+          return resp;
+        })
+        .catch(() => caches.match(req).then((c) => c || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // CACHE-FIRST per gli altri asset statici (Chart.js, manifest, icone).
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      if (cached) return cached;
+      return fetch(req)
+        .then((resp) => {
+          if (resp && resp.status === 200 && req.method === 'GET') {
+            const clone = resp.clone();
+            caches.open(CACHE).then((cache) => cache.put(req, clone));
           }
           return resp;
         })
