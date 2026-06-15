@@ -242,8 +242,17 @@ small{font-size:11.5px}
         <button class="chip" id="refreshAll">↻</button>
       </div>
       <div class="set-row">
-        <div style="font-weight:600">Auto-refresh (60s)</div>
-        <div class="switch" id="swAuto"></div>
+        <div><div style="font-weight:600">Prezzi live</div>
+          <small class="muted">Aggiorna i prezzi ogni <span id="liveSecLbl">30</span>s</small></div>
+        <div class="switch" id="swLive"></div>
+      </div>
+      <div class="set-row">
+        <div style="font-weight:600">Intervallo</div>
+        <div style="display:flex;gap:6px" id="liveIntervals">
+          <button class="chip" data-sec="15">15s</button>
+          <button class="chip" data-sec="30">30s</button>
+          <button class="chip" data-sec="60">60s</button>
+        </div>
       </div>
       <div class="set-row">
         <div style="font-weight:600">Modalità privacy (nascondi €)</div>
@@ -293,6 +302,8 @@ let portfolio = [];          // raw rows from Apps Script
 let priceData = {};          // ticker_yf -> computed data
 let eurusd = 1.08;
 let settings = loadJSON(LS.set,{auto:false,privacy:false,theme:'dark'});
+if(settings.live===undefined)settings.live=true;
+if(!settings.liveSec)settings.liveSec=30;
 let alertsRead = loadJSON(LS.read,{});
 let currentSort = 'value';
 let strongFilter = false;
@@ -508,6 +519,35 @@ async function refreshPrices(force){
   localStorage.setItem(LS.pricesTs,Date.now());
   renderAll();
   if(force){perfState.cache={};if($('#perfCard')?.dataset.built)drawPerfChart(perfState.period)}
+}
+
+/* Polling leggero: una sola richiesta per tutti i ticker (endpoint spark).
+   Aggiorna solo prezzo / chiusura prec. / stato mercato, senza ricalcolare
+   gli indicatori (quelli restano a carico del refresh pesante). */
+async function refreshQuotes(){
+  if(!portfolio.length)return;
+  const syms=portfolio.map(r=>r.ticker_yf).join(',');
+  const u=`${Y}/v7/finance/spark?symbols=${syms}&range=1d&interval=5m`;
+  let j;
+  try{
+    const res=await fetch(PROXY+encodeURIComponent(u));
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    j=await res.json();
+  }catch(e){return}
+  const results=j?.spark?.result||[];
+  const map={};
+  results.forEach(r=>{
+    const m=r.response?.[0]?.meta;
+    if(m&&m.regularMarketPrice!=null){
+      map[r.symbol]={price:m.regularMarketPrice,prev:m.previousClose??m.chartPreviousClose,state:m.marketState};
+    }
+  });
+  let changed=false;
+  for(const row of portfolio){
+    const d=priceData[row.ticker_yf],q=map[row.ticker_yf];
+    if(d&&q){d.price=q.price;if(q.prev!=null)d.prevClose=q.prev;if(q.state)d.state=q.state;d.failed=false;changed=true}
+  }
+  if(changed){renderSummary();renderInstruments();updateMarketDot();renderSignals()}
 }
 
 /* =========================================================================
@@ -964,7 +1004,9 @@ function renderSettings(){
   $('#urlMasked').textContent=url?url.slice(0,28)+'…'+url.slice(-6):'non impostato';
   const ts=+localStorage.getItem(LS.pricesTs)||0;
   $('#lastSync').textContent=ts?'Ultimo agg.: '+new Date(ts).toLocaleString('it-IT'):'mai';
-  $('#swAuto').classList.toggle('on',settings.auto);
+  $('#swLive').classList.toggle('on',settings.live);
+  $('#liveSecLbl').textContent=settings.liveSec||30;
+  $$('#liveIntervals .chip').forEach(b=>b.classList.toggle('active',+b.dataset.sec===(settings.liveSec||30)));
   $('#swPrivacy').classList.toggle('on',settings.privacy);
   $('#swTheme').classList.toggle('on',settings.theme==='light');
 }
@@ -1173,7 +1215,8 @@ $('#refreshSignals').onclick=()=>refreshPrices(true);
 $('#refreshAll').onclick=async()=>{await loadPortfolio(true);await refreshPrices(true)};
 $('#changeUrl').onclick=()=>{localStorage.removeItem(LS.url);showSetup()};
 
-$('#swAuto').onclick=function(){settings.auto=!settings.auto;saveJSON(LS.set,settings);this.classList.toggle('on');setupAuto()};
+$('#swLive').onclick=function(){settings.live=!settings.live;saveJSON(LS.set,settings);this.classList.toggle('on');setupAuto();if(settings.live)refreshQuotes()};
+$$('#liveIntervals .chip').forEach(b=>b.onclick=()=>{settings.liveSec=+b.dataset.sec;saveJSON(LS.set,settings);renderSettings();setupAuto()});
 $('#swPrivacy').onclick=function(){settings.privacy=!settings.privacy;saveJSON(LS.set,settings);this.classList.toggle('on');renderAll()};
 $('#swTheme').onclick=function(){settings.theme=settings.theme==='light'?'dark':'light';saveJSON(LS.set,settings);applyTheme();this.classList.toggle('on');renderAll()};
 
@@ -1188,7 +1231,7 @@ function applyTheme(){
 }
 function setupAuto(){
   if(autoTimer){clearInterval(autoTimer);autoTimer=null}
-  if(settings.auto)autoTimer=setInterval(()=>refreshPrices(false),60000);
+  if(settings.live)autoTimer=setInterval(refreshQuotes,(settings.liveSec||30)*1000);
 }
 
 function buildReport(){
@@ -1245,7 +1288,10 @@ async function boot(){
     renderInstruments(); // skeletons already / quick paint
     renderSettings();
     await refreshPrices(false);
-    // periodic portfolio refresh (30 min)
+    setupAuto(); // avvia il polling leggero dei prezzi
+    // refresh pesante degli indicatori ogni 10 min
+    setInterval(()=>refreshPrices(false),10*60*1000);
+    // rilettura portafoglio dal foglio ogni 30 min
     setInterval(()=>loadPortfolio(false),REFRESH_MS);
   }catch(e){
     console.error(e);
