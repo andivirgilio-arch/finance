@@ -390,8 +390,11 @@ function weeklyReturns(closes){const r=[];for(let i=1;i<closes.length;i++){if(cl
    DATA FETCH
    ========================================================================= */
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-// Anti-cache a finestre di 15s: dati freschi senza martellare il proxy.
-const cb=()=>Math.floor(Date.now()/15000);
+// Cache-buster univoco per richiesta. DEVE essere inserito DENTRO l'URL Yahoo
+// (prima dell'encode): così cambia la chiave di cache del proxy CORS e si forza
+// il refetch a monte. Messo fuori (come param del proxy) verrebbe ignorato e si
+// otterrebbero dati vecchi di ore/giorni finché il proxy non scade la sua cache.
+const cb=()=>Date.now();
 // Esegue fn sugli items con al massimo `limit` richieste in parallelo.
 async function mapLimit(items,limit,fn){
   const res=[];let i=0;
@@ -405,9 +408,9 @@ async function mapLimit(items,limit,fn){
 }
 async function yfChart(ticker,range,retry=1){
   const q=RANGES[range];
-  const u=`${Y}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${q.interval}&range=${q.range}`;
+  const u=`${Y}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${q.interval}&range=${q.range}&_t=${cb()}`;
   try{
-    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+cb());
+    const res=await fetch(PROXY+encodeURIComponent(u),{cache:'no-store'});
     if(!res.ok)throw new Error('HTTP '+res.status);
     const j=await res.json();
     const r=j.chart?.result?.[0];
@@ -432,8 +435,8 @@ function extract(r){
 
 async function fetchEurUsd(){
   try{
-    const u=`${Y}/v8/finance/chart/EURUSD=X?interval=1d&range=5d`;
-    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+cb());
+    const u=`${Y}/v8/finance/chart/EURUSD=X?interval=1d&range=5d&_t=${cb()}`;
+    const res=await fetch(PROXY+encodeURIComponent(u),{cache:'no-store'});
     const j=await res.json();
     const p=j.chart?.result?.[0]?.meta?.regularMarketPrice;
     if(p)eurusd=p;
@@ -501,7 +504,7 @@ async function loadPortfolio(force){
 
   if(cached&&fresh&&!force){portfolio=cached;return true}
   try{
-    const res=await fetch(url);
+    const res=await fetch(url+(url.includes('?')?'&':'?')+'_t='+Date.now(),{cache:'no-store'});
     if(!res.ok)throw new Error('HTTP '+res.status);
     const data=await res.json();
     if(!Array.isArray(data))throw new Error('bad format');
@@ -547,10 +550,10 @@ async function refreshPrices(force){
 async function refreshQuotes(){
   if(!portfolio.length)return;
   const syms=portfolio.map(r=>r.ticker_yf).join(',');
-  const u=`${Y}/v7/finance/spark?symbols=${syms}&range=1d&interval=5m`;
+  const u=`${Y}/v7/finance/spark?symbols=${syms}&range=1d&interval=5m&_t=${cb()}`;
   let j;
   try{
-    const res=await fetch(PROXY+encodeURIComponent(u)+'&_cb='+cb());
+    const res=await fetch(PROXY+encodeURIComponent(u),{cache:'no-store'});
     if(!res.ok)throw new Error('HTTP '+res.status);
     j=await res.json();
   }catch(e){return}
