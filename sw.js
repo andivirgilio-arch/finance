@@ -1,11 +1,12 @@
 /* ADV Portafoglio — Service Worker
  * Cache-first per gli asset statici, network-first per le API esterne.
  */
-const CACHE = 'adv-portafoglio-v12';
+const CACHE = 'adv-portafoglio-v13';
 const STATIC_ASSETS = [
   './',
   './index.html',
   './manifest.json',
+  './icon.svg',
   'https://cdn.jsdelivr.net/npm/chart.js'
 ];
 

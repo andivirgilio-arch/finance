@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ADV stonks">
+  <defs>
+    <clipPath id="round"><rect width="512" height="512" rx="108"/></clipPath>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d4f86"/>
+      <stop offset="1" stop-color="#12345d"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#round)">
+    <!-- sfondo a griglia tipo chart -->
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <g stroke="#4d86c4" stroke-width="2" opacity="0.45">
+      <path d="M64 0V512M128 0V512M192 0V512M256 0V512M320 0V512M384 0V512M448 0V512"/>
+      <path d="M0 64H512M0 128H512M0 192H512M0 256H512M0 320H512M0 384H512M0 448H512"/>
+    </g>
+
+    <!-- meme man -->
+    <g>
+      <!-- giacca -->
+      <path d="M96 384 C96 304 150 286 190 286 C230 286 284 304 284 384 L284 392 L96 392 Z" fill="#22395c"/>
+      <!-- camicia -->
+      <path d="M168 290 L190 332 L212 290 Z" fill="#eef3f9"/>
+      <!-- cravatta arancione -->
+      <path d="M181 291 L199 291 L205 334 L190 356 L175 334 Z" fill="#ff7d1a"/>
+      <!-- testa -->
+      <ellipse cx="190" cy="220" rx="56" ry="68" fill="#cfc8bc"/>
+      <ellipse cx="190" cy="218" rx="50" ry="62" fill="#d8d2c7"/>
+      <!-- occhi e bocca inespressivi -->
+      <ellipse cx="172" cy="214" rx="6" ry="9" fill="#3b372f"/>
+      <ellipse cx="208" cy="214" rx="6" ry="9" fill="#3b372f"/>
+      <path d="M172 250 Q190 260 208 250" stroke="#3b372f" stroke-width="5" fill="none" stroke-linecap="round"/>
+    </g>
+
+    <!-- freccia STONKS verso l'alto -->
+    <path d="M250 366 L392 196" stroke="#ff7d1a" stroke-width="34" fill="none" stroke-linecap="round"/>
+    <polygon points="423,158 372,176 410,222" fill="#ff7d1a"/>
+
+    <!-- scritta -->
+    <text x="256" y="452" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="62" font-weight="800" letter-spacing="3" fill="#ffffff">STONKS</text>
+  </g>
+</svg>

@@ -6,10 +6,10 @@
 <meta name="theme-color" content="#0D1117">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ADV Portafoglio">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230D1117'/%3E%3Cpath d='M40 130 L78 92 L104 116 L150 64' stroke='%2358A6FF' stroke-width='12' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='150' cy='64' r='10' fill='%233FB950'/%3E%3C/svg%3E">
+<meta name="apple-mobile-web-app-title" content="ADV stonks">
+<link rel="apple-touch-icon" href="icon.svg">
 <link rel="manifest" href="manifest.json">
-<title>ADV Portafoglio</title>
+<title>ADV stonks</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -181,7 +181,7 @@ small{font-size:11.5px}
 <!-- ============ SETUP SCREEN ============ -->
 <div id="setupScreen" class="hidden">
   <div class="setup">
-    <h2>📈 ADV Portafoglio</h2>
+    <h2>📈 ADV stonks</h2>
     <p>Incolla l'URL della tua Google Apps Script Web App per connettere il portafoglio.</p>
     <input type="url" id="setupUrl" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
     <div style="height:12px"></div>
@@ -193,7 +193,7 @@ small{font-size:11.5px}
 <!-- ============ MAIN APP ============ -->
 <div id="appRoot" class="hidden">
   <header class="app-header">
-    <h1><span id="mktDot" class="market-dot closed"></span> ADV Portafoglio</h1>
+    <h1><span id="mktDot" class="market-dot closed"></span> ADV stonks</h1>
   </header>
   <div id="warnBanner" class="warn-banner hidden">Dati portafoglio non aggiornati - uso cache locale</div>
   <div id="ptr" class="ptr"></div>
@@ -1299,7 +1299,7 @@ function setupAuto(){
 
 function buildReport(){
   const s=portfolioStats();const fg=fearGreed();
-  let r=`📊 ADV PORTAFOGLIO — ${new Date().toLocaleString('it-IT')}\n`;
+  let r=`📊 ADV STONKS — ${new Date().toLocaleString('it-IT')}\n`;
   r+=`\nValore totale: ${fmtEur(s.total)}\nInvestito: ${fmtEur(s.invested)}\nP/L: ${fmtEur(s.pl)} (${fmtPct(s.plpct)})\n`;
   r+=`Var. giornaliera: ${fmtEur(s.dailyPL)} (${fmtPct(s.dailyPct)})\n`;
   r+=`Beta portafoglio: ${fmtNum(s.wBeta)}\nVaR 95%: -${fmtEur(s.var95)}\n`;
