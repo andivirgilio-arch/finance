@@ -1,7 +1,7 @@
 /* ADV Portafoglio — Service Worker
  * Cache-first per gli asset statici, network-first per le API esterne.
  */
-const CACHE = 'adv-portafoglio-v10';
+const CACHE = 'adv-portafoglio-v11';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -32,6 +32,7 @@ self.addEventListener('fetch', (event) => {
   // Non intercettare le chiamate dati (Yahoo / proxy / Apps Script): vanno sempre in rete.
   if (
     url.includes('corsproxy.io') ||
+    url.includes('allorigins.win') ||
     url.includes('query1.finance.yahoo.com') ||
     url.includes('query2.finance.yahoo.com') ||
     url.includes('script.google.com') ||

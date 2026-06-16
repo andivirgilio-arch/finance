@@ -288,7 +288,6 @@ const LS = {
   url:'APPS_SCRIPT_URL', port:'portfolio_data', portTs:'portfolio_ts',
   prices:'prices_cache', pricesTs:'prices_ts', read:'alerts_read', set:'settings'
 };
-const PROXY = 'https://corsproxy.io/?url=';
 const Y = 'https://query1.finance.yahoo.com';
 const RANGES = {
   '1G':{interval:'5m',range:'1d'}, '1S':{interval:'1h',range:'5d'},
@@ -395,6 +394,28 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // il refetch a monte. Messo fuori (come param del proxy) verrebbe ignorato e si
 // otterrebbero dati vecchi di ore/giorni finché il proxy non scade la sua cache.
 const cb=()=>Date.now();
+
+// Proxy CORS in cascata: se il primo fallisce (rate-limit/overload) si prova il
+// successivo. Riduce drasticamente i fetch falliti → niente posizioni che
+// "spariscono" dal totale a ogni refresh.
+const PROXIES=[
+  u=>'https://corsproxy.io/?url='+encodeURIComponent(u),
+  u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u)
+];
+async function proxyGet(yurl,retry=2){
+  let lastErr;
+  for(let attempt=0;attempt<=retry;attempt++){
+    const build=PROXIES[attempt%PROXIES.length];
+    try{
+      const res=await fetch(build(yurl),{cache:'no-store'});
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      return await res.json();
+    }catch(e){lastErr=e;if(attempt<retry)await sleep(400);}
+  }
+  throw lastErr||new Error('proxy failed');
+}
+// Concorrenza prudente: troppi fetch simultanei fanno crollare il proxy gratuito.
+const PRICE_CONCURRENCY=3;
 // Esegue fn sugli items con al massimo `limit` richieste in parallelo.
 async function mapLimit(items,limit,fn){
   const res=[];let i=0;
@@ -406,20 +427,13 @@ async function mapLimit(items,limit,fn){
   await Promise.all(workers);
   return res;
 }
-async function yfChart(ticker,range,retry=1){
+async function yfChart(ticker,range){
   const q=RANGES[range];
   const u=`${Y}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${q.interval}&range=${q.range}&_t=${cb()}`;
-  try{
-    const res=await fetch(PROXY+encodeURIComponent(u),{cache:'no-store'});
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    const j=await res.json();
-    const r=j.chart?.result?.[0];
-    if(!r)throw new Error('no data');
-    return r;
-  }catch(e){
-    if(retry>0){await sleep(500);return yfChart(ticker,range,retry-1)}
-    throw e;
-  }
+  const j=await proxyGet(u);
+  const r=j.chart?.result?.[0];
+  if(!r)throw new Error('no data');
+  return r;
 }
 function extract(r){
   const m=r.meta||{};
@@ -436,8 +450,7 @@ function extract(r){
 async function fetchEurUsd(){
   try{
     const u=`${Y}/v8/finance/chart/EURUSD=X?interval=1d&range=5d&_t=${cb()}`;
-    const res=await fetch(PROXY+encodeURIComponent(u),{cache:'no-store'});
-    const j=await res.json();
+    const j=await proxyGet(u);
     const p=j.chart?.result?.[0]?.meta?.regularMarketPrice;
     if(p)eurusd=p;
   }catch(e){/* keep cached */}
@@ -521,27 +534,56 @@ async function loadPortfolio(force){
 
 function showBanner(show){$('#warnBanner').classList.toggle('hidden',!show)}
 
+/* Ripristina l'ultimo dato affidabile salvato (con timestamp) così all'avvio,
+   o quando un fetch fallisce, mostriamo l'ultimo valore reale e NON una somma
+   parziale. I dati ripristinati sono marcati stale finché un fetch non riesce. */
+function snapshotOf(v){
+  return {price:v.price,prevClose:v.prevClose,currency:v.currency,
+          todayOpen:v.todayOpen,high52:v.high52,low52:v.low52,ts:Date.now()};
+}
+function hydrateFromCache(){
+  const cache=loadJSON(LS.prices,{});
+  for(const row of portfolio){
+    const t=row.ticker_yf, c=cache[t];
+    if(c && priceData[t]==null && c.price!=null){
+      priceData[t]={ticker:t,row,failed:true,stale:true,price:c.price,prevClose:c.prevClose,
+        currency:c.currency||row.currency,todayOpen:c.todayOpen,high52:c.high52,low52:c.low52,asOf:c.ts};
+    }
+  }
+}
+
 async function refreshPrices(force){
   if(!portfolio.length)return;
+  hydrateFromCache();           // parti dall'ultimo dato buono, mai da zero
   await fetchEurUsd();
-  const results=await mapLimit(portfolio,4,fetchInstrument);
+  const results=await mapLimit(portfolio,PRICE_CONCURRENCY,fetchInstrument);
   const cache=loadJSON(LS.prices,{});
-  priceData={};
+  let ok=0;
   results.forEach((r,i)=>{
-    const row=portfolio[i];
+    const row=portfolio[i], t=row.ticker_yf;
     if(r.status==='fulfilled'&&!r.value.failed){
-      priceData[row.ticker_yf]=r.value;
-      // cache a light snapshot
-      cache[row.ticker_yf]={price:r.value.price,prevClose:r.value.prevClose,ts:Date.now()};
+      r.value.stale=false; r.value.asOf=Date.now();
+      priceData[t]=r.value;                  // dato fresco → sostituisce
+      cache[t]=snapshotOf(r.value);          // salva snapshot affidabile
+      ok++;
     }else{
-      const c=cache[row.ticker_yf];
-      priceData[row.ticker_yf]={ticker:row.ticker_yf,row,failed:true,price:c?.price,prevClose:c?.prevClose,currency:row.currency};
+      // Fallito: NON azzerare. Tieni l'ultimo dato pieno (prezzo + indicatori)
+      // marcandolo stale. La posizione resta nel totale → niente sbalzi.
+      const prev=priceData[t];
+      if(prev){prev.failed=true;prev.stale=true;}
+      else{
+        const c=cache[t];
+        if(c&&c.price!=null)priceData[t]={ticker:t,row,failed:true,stale:true,price:c.price,prevClose:c.prevClose,
+          currency:c.currency||row.currency,todayOpen:c.todayOpen,high52:c.high52,low52:c.low52,asOf:c.ts};
+      }
     }
   });
   saveJSON(LS.prices,cache);
-  localStorage.setItem(LS.pricesTs,Date.now());
+  if(ok>0)localStorage.setItem(LS.pricesTs,Date.now());
+  // Banner se nessun prezzo si è aggiornato in questo giro.
+  showBanner(ok===0 && portfolio.length>0);
   renderAll();
-  if(force){perfState.cache={};if($('#perfCard')?.dataset.built)drawPerfChart(perfState.period)}
+  if(force&&ok>0){perfState.cache={};if($('#perfCard')?.dataset.built)drawPerfChart(perfState.period)}
 }
 
 /* Polling leggero: una sola richiesta per tutti i ticker (endpoint spark).
@@ -550,13 +592,9 @@ async function refreshPrices(force){
 async function refreshQuotes(){
   if(!portfolio.length)return;
   const syms=portfolio.map(r=>r.ticker_yf).join(',');
-  const u=`${Y}/v7/finance/spark?symbols=${syms}&range=1d&interval=5m&_t=${cb()}`;
+  const u=`${Y}/v7/finance/spark?symbols=${encodeURIComponent(syms)}&range=1d&interval=5m&_t=${cb()}`;
   let j;
-  try{
-    const res=await fetch(PROXY+encodeURIComponent(u),{cache:'no-store'});
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    j=await res.json();
-  }catch(e){return}
+  try{ j=await proxyGet(u); }catch(e){return}
   const results=j?.spark?.result||[];
   const map={};
   results.forEach(r=>{
@@ -566,11 +604,22 @@ async function refreshQuotes(){
     }
   });
   let changed=false;
+  const cache=loadJSON(LS.prices,{});
   for(const row of portfolio){
-    const d=priceData[row.ticker_yf],q=map[row.ticker_yf];
-    if(d&&q){d.price=q.price;if(q.prev!=null)d.prevClose=q.prev;if(q.state)d.state=q.state;d.failed=false;changed=true}
+    const t=row.ticker_yf, d=priceData[t], q=map[t];
+    if(d&&q){
+      d.price=q.price;if(q.prev!=null)d.prevClose=q.prev;if(q.state)d.state=q.state;
+      d.failed=false;d.stale=false;d.asOf=Date.now();changed=true;
+      const c=cache[t]||{};c.price=q.price;if(q.prev!=null)c.prevClose=q.prev;
+      if(d.currency)c.currency=d.currency;c.ts=Date.now();cache[t]=c;
+    }
   }
-  if(changed){renderSummary();renderInstruments();updateMarketDot();renderSignals()}
+  if(changed){
+    saveJSON(LS.prices,cache);
+    localStorage.setItem(LS.pricesTs,Date.now());
+    showBanner(false);
+    renderSummary();renderInstruments();updateMarketDot();renderSignals();
+  }
 }
 
 /* =========================================================================
@@ -947,12 +996,20 @@ function instSorted(){
   arr.sort(by[currentSort]||by.value);
   return arr;
 }
+function ageStr(ts){
+  if(!ts)return 'n/d';
+  const s=Math.max(0,Math.floor((Date.now()-ts)/1000));
+  if(s<90)return 'adesso';
+  const m=Math.floor(s/60);if(m<90)return m+'m fa';
+  const h=Math.floor(m/60);if(h<48)return h+'h fa';
+  return Math.floor(h/24)+'g fa';
+}
 function renderInstruments(){
   const list=$('#instList');list.innerHTML='';
   if(!portfolio.length){list.innerHTML=skeletonCards(4);return}
   for(const x of instSorted()){
     const {row,d,m,bs}=x;
-    const warnIco=d.failed?'<span title="prezzo in cache">⚠️</span>':'';
+    const warnIco=(d.stale||d.failed)?`<span title="Ultimo dato affidabile · ${ageStr(d.asOf)}">⚠️</span>`:'';
     const rsiTxt=d.rsi!=null?`RSI ${fmtNum(d.rsi,0)}`:'RSI —';
     const card=el('div','inst');
     card.innerHTML=`
@@ -1310,7 +1367,8 @@ async function boot(){
     const ok=await loadPortfolio(false);
     if(!ok){showSetup();return}
     showApp();
-    renderInstruments(); // skeletons already / quick paint
+    hydrateFromCache();   // mostra subito l'ultimo dato affidabile salvato
+    if(Object.keys(priceData).length){renderAll()}else{renderInstruments()/*skeleton al primo avvio*/}
     renderSettings();
     await refreshPrices(false);
     setupAuto(); // avvia il polling leggero dei prezzi
