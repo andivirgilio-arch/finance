@@ -333,6 +333,25 @@ const GEO_PRESET_LABELS = [
   ['em','100% Mercati Emergenti'],
   ['commodity','Materie prime / non azionario']
 ];
+// Allocazioni REALI da scheda tecnica ufficiale (al 31/05/2026), per ticker base.
+// Hanno priorità sulle stime automatiche. ALTRO = obbligazioni / materie prime / liquidità.
+const GEO_EXACT = {
+  // FTSE All-World / ACWI (incl. emergenti)
+  VWCE:{USA:62,EXUS:28,EM:10}, VWRA:{USA:62,EXUS:28,EM:10}, VWRP:{USA:62,EXUS:28,EM:10},
+  FWRA:{USA:61,EXUS:28,EM:11}, FWRG:{USA:61,EXUS:28,EM:11},
+  ISAC:{USA:63,EXUS:27,EM:10}, SSAC:{USA:63,EXUS:27,EM:10},
+  // MSCI World (solo sviluppati)
+  SWDA:{USA:72,EXUS:28}, IWDA:{USA:72,EXUS:28},
+  // MSCI World ex USA
+  EXUS:{EXUS:100}, XMWX:{EXUS:100},
+  // MSCI World Value Factor
+  IWVL:{USA:47,EXUS:53},
+  // Automation & Robotics (Stoxx Global)
+  RBOT:{USA:61,EXUS:35,EM:4}, RBOE:{USA:61,EXUS:35,EM:4},
+  // LifeStrategy 80% (80% azioni / 20% obbligazioni→Altro)
+  VNGA80:{USA:49,EXUS:23,EM:8,ALTRO:20}, V80A:{USA:49,EXUS:23,EM:8,ALTRO:20}
+};
+function baseSym(t){return (t||'').split('.')[0].toUpperCase()}
 
 /* ---------- helpers ---------- */
 function loadJSON(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
@@ -811,13 +830,24 @@ function autoPreset(row){
   return null;   // ETF senza indizi
 }
 // Scomposizione geografica effettiva dello strumento (percentuali → 100).
+// Priorità: override manuale → dati ufficiali scheda tecnica → stima automatica.
 function geoBreakdownOf(row){
   const ov=geoOverrides[row.ticker_yf];
-  const key=(ov&&ov!=='auto')?ov:autoPreset(row);
+  if(ov&&ov!=='auto'&&GEO_PRESETS[ov])return normBreak(GEO_PRESETS[ov]);
+  const ex=GEO_EXACT[baseSym(row.ticker_yf)];
+  if(ex)return normBreak(ex);
+  const key=autoPreset(row);
   return normBreak(key&&GEO_PRESETS[key]);
 }
+// Fonte del dato geografico: 'manual' | 'exact' (scheda tecnica) | 'auto' | 'none'.
+function geoSource(row){
+  const ov=geoOverrides[row.ticker_yf];
+  if(ov&&ov!=='auto')return 'manual';
+  if(GEO_EXACT[baseSym(row.ticker_yf)])return 'exact';
+  return autoPreset(row)?'auto':'none';
+}
 // true se l'app non sa classificarlo (ETF ignoto, finisce in 'Altro').
-function geoUnknown(row){return !geoOverrides[row.ticker_yf] && autoPreset(row)===null}
+function geoUnknown(row){return geoSource(row)==='none'}
 function setGeoProfile(ticker,key){
   if(key&&key!=='auto'&&GEO_PRESETS[key])geoOverrides[ticker]=key; else delete geoOverrides[ticker];
   saveJSON(LS.geo,geoOverrides);
@@ -993,7 +1023,7 @@ function renderGeo(){
     <div class="bar" style="height:12px;display:flex;margin-top:10px;border-radius:6px;overflow:hidden">${bar}</div>
     ${rows}
     ${warn}${unk}
-    <div class="muted" style="font-size:10.5px;margin-top:8px">Stime su profili di indice tipici (scheda tecnica), non dati live. Modificabili dal dettaglio di ogni strumento.</div>
+    <div class="muted" style="font-size:10.5px;margin-top:8px">Dati da scheda tecnica ufficiale dove disponibile, altrimenti stime su profili tipici. Modificabili dal dettaglio di ogni strumento.</div>
   </div>`;
 }
 
@@ -1295,7 +1325,13 @@ function geoDetailHtml(row){
   const segs=GEO_GROUPS.filter(g=>bd[g.key]>0.005).map(g=>`<span title="${g.label} ${fmtNum(bd[g.key],0)}%" style="position:relative;width:${bd[g.key]}%;background:${g.color};display:inline-block;height:100%"></span>`).join('');
   const legend=GEO_GROUPS.filter(g=>bd[g.key]>0.005).map(g=>`<span style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:${g.color}"></span>${g.label} ${fmtNum(bd[g.key],0)}%</span>`).join('');
   const opts=GEO_PRESET_LABELS.map(([k,lbl])=>`<option value="${k}" ${k===cur?'selected':''}>${lbl}</option>`).join('');
-  const src=(cur==='auto')?(autoPreset(row)?'Profilo automatico (dal nome/borsa).':'Non classificato: scegli un profilo.'):'Profilo impostato manualmente.';
+  const srcMap={
+    manual:'Profilo impostato manualmente.',
+    exact:'✓ Dati da scheda tecnica ufficiale dell\'ETF.',
+    auto:'Profilo stimato (dal nome/borsa).',
+    none:'Non classificato: scegli un profilo.'
+  };
+  const src=srcMap[geoSource(row)];
   return `<div class="card" data-geocard="1">
     <div class="row" style="align-items:center">
       <div style="font-weight:600">Profilo di allocazione</div>
@@ -1303,7 +1339,7 @@ function geoDetailHtml(row){
     </div>
     <div class="bar" style="height:10px;display:flex;margin-top:10px;border-radius:5px;overflow:hidden">${segs}</div>
     <div style="display:flex;gap:12px;margin-top:8px;font-size:11.5px;flex-wrap:wrap">${legend}</div>
-    <small class="muted" style="display:block;margin-top:8px">${src} Percentuali da profili di indice tipici, non dati live.</small>
+    <small class="muted" style="display:block;margin-top:8px">${src} Seleziona un profilo per forzare un'allocazione diversa.</small>
   </div>`;
 }
 function bindGeoSelect(ticker){
