@@ -294,6 +294,9 @@ const REFRESH_MS = 30*60*1000;
 // refresh (anche forzato) NON contatta la rete: si limita a segnalare l'orario
 // dell'ultimo aggiornamento. Snellisce l'app ed evita di martellare il proxy.
 const MIN_REFRESH_MS = 5*60*1000;
+// Oltre questa età un prezzo è considerato "non aggiornato" (⚠️): vuol dire che
+// il fetch sta fallendo da più cicli, non il normale ritardo di 5 minuti.
+const STALE_MS = 15*60*1000;
 
 let portfolio = [];          // raw rows from Apps Script
 let priceData = {};          // ticker_yf -> computed data
@@ -473,7 +476,7 @@ async function mapLimit(items,limit,fn){
   return res;
 }
 async function yfChart(ticker,range){
-  const q=RANGES[range];
+  const q=(typeof range==='string')?RANGES[range]:range;   // chiave RANGES o {interval,range} esplicito
   const u=`${Y}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${q.interval}&range=${q.range}&_t=${cb()}`;
   const j=await proxyGet(u);
   const r=j.chart?.result?.[0];
@@ -501,10 +504,12 @@ async function fetchEurUsd(){
   }catch(e){/* keep cached */}
 }
 
-/* fetch 3mo (daily) for RSI/MACD/Bollinger/ATR + 1y (weekly) for SMA/beta/drawdown */
+/* fetch 3mo (daily) per RSI/MACD/Bollinger/ATR + 1y (DAILY) per SMA50/200, Golden
+   Cross, drawdown e beta. NB: serve dato giornaliero (~252 punti): 1 anno settimanale
+   (52 punti) non basta per la SMA200 → criterio "Prezzo > SMA200" sempre morto. */
 async function fetchInstrument(row){
   const t=row.ticker_yf;
-  const [d3,y1]=await Promise.allSettled([yfChart(t,'3M'),yfChart(t,'1A')]);
+  const [d3,y1]=await Promise.allSettled([yfChart(t,'3M'),yfChart(t,{interval:'1d',range:'1y'})]);
   const out={ticker:t,row,failed:false};
   let meta=null;
 
@@ -523,12 +528,14 @@ async function fetchInstrument(row){
   if(y1.status==='fulfilled'){
     const e=extract(y1.value);if(!meta)meta=e;
     out.yearly=e;
-    const wc=e.close.filter(v=>v!=null);
-    out.closes1y=wc;
-    out.sma50=lastDefined(sma(wc,50));   // weekly approx; recompute below from daily if available
-    out.sma200=lastDefined(sma(wc,200));
-    out.maxDD=maxDrawdown(wc);
-    out.weeklyRet=weeklyReturns(wc);
+    const dc=e.close.filter(v=>v!=null);   // ~252 chiusure GIORNALIERE
+    out.closes1y=dc;
+    out.sma50=lastDefined(sma(dc,50));
+    out.sma200=lastDefined(sma(dc,200));   // ora calcolabile (≥200 punti)
+    out.maxDD=maxDrawdown(dc);
+    // ritorni settimanali (campiona ogni 5 sedute) per il beta
+    const wk=[];for(let i=0;i<dc.length;i+=5)wk.push(dc[i]);
+    out.weeklyRet=weeklyReturns(wk);
   }
   if(!meta){out.failed=true;return out;}
 
@@ -702,10 +709,10 @@ function macdBullCross(m){
   return false;
 }
 function crossInfo(d){
-  // golden/death within ~30 days. Approx with weekly sma50/200 series.
-  if(!d.closes1y||d.closes1y.length<60)return {golden:false,death:false};
+  // golden/death cross negli ultimi ~25 giorni di borsa, su SMA50/200 GIORNALIERE.
+  if(!d.closes1y||d.closes1y.length<200)return {golden:false,death:false};
   const s50=sma(d.closes1y,50), s200=sma(d.closes1y,200);
-  const n=d.closes1y.length;const look=Math.min(6,n-1); // 6 weeks ~ 30 trading days
+  const n=d.closes1y.length;const look=Math.min(25,n-1);
   for(let i=n-look;i<n;i++){
     if(s50[i-1]!=null&&s200[i-1]!=null&&s50[i]!=null&&s200[i]!=null){
       if(s50[i-1]<=s200[i-1]&&s50[i]>s200[i])return {golden:true,death:false};
@@ -1142,7 +1149,8 @@ function renderInstruments(){
   if(!portfolio.length){list.innerHTML=skeletonCards(4);return}
   for(const x of instSorted()){
     const {row,d,m,bs}=x;
-    const warnIco=(d.stale||d.failed)?`<span title="Ultimo dato affidabile · ${ageStr(d.asOf)}">⚠️</span>`:'';
+    const old=!d.asOf||(Date.now()-d.asOf>STALE_MS);
+    const warnIco=old?`<span title="Prezzo non aggiornato · ${ageStr(d.asOf)}">⚠️</span>`:'';
     const rsiTxt=d.rsi!=null?`RSI ${fmtNum(d.rsi,0)}`:'RSI —';
     const card=el('div','inst');
     card.innerHTML=`
