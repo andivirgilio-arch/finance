@@ -971,7 +971,7 @@ function renderGeo(){
   const groups=GEO_GROUPS.map(g=>({...g,value:s.byGroup[g.key]||0,pct:(s.byGroup[g.key]||0)/s.total*100}))
                          .filter(g=>g.value>0.005);
   // barra impilata (ordine fisso USA → ex-USA → EM → Altro)
-  let bar=groups.map(g=>`<span title="${g.label} ${fmtNum(g.pct,1)}%" style="width:${g.pct}%;background:${g.color};display:inline-block;height:100%"></span>`).join('');
+  let bar=groups.map(g=>`<span title="${g.label} ${fmtNum(g.pct,1)}%" style="position:relative;width:${g.pct}%;background:${g.color};display:inline-block;height:100%"></span>`).join('');
   // righe dettaglio
   const rows=groups.map(g=>`<div class="row" style="margin-top:8px;align-items:center">
       <div style="display:flex;align-items:center;gap:8px;min-width:0">
@@ -1292,7 +1292,7 @@ function indBox(k,v,sub){return `<div class="ind-box"><div class="k">${k}</div><
 function geoDetailHtml(row){
   const cur=geoOverrides[row.ticker_yf]||'auto';
   const bd=geoBreakdownOf(row);
-  const segs=GEO_GROUPS.filter(g=>bd[g.key]>0.005).map(g=>`<span title="${g.label} ${fmtNum(bd[g.key],0)}%" style="width:${bd[g.key]}%;background:${g.color};display:inline-block;height:100%"></span>`).join('');
+  const segs=GEO_GROUPS.filter(g=>bd[g.key]>0.005).map(g=>`<span title="${g.label} ${fmtNum(bd[g.key],0)}%" style="position:relative;width:${bd[g.key]}%;background:${g.color};display:inline-block;height:100%"></span>`).join('');
   const legend=GEO_GROUPS.filter(g=>bd[g.key]>0.005).map(g=>`<span style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:${g.color}"></span>${g.label} ${fmtNum(bd[g.key],0)}%</span>`).join('');
   const opts=GEO_PRESET_LABELS.map(([k,lbl])=>`<option value="${k}" ${k===cur?'selected':''}>${lbl}</option>`).join('');
   const src=(cur==='auto')?(autoPreset(row)?'Profilo automatico (dal nome/borsa).':'Non classificato: scegli un profilo.'):'Profilo impostato manualmente.';
