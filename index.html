@@ -306,13 +306,33 @@ let currentSort = 'value';
 let strongFilter = false;
 let autoTimer = null;
 
-// Regioni di esposizione geografica + colori per le barre.
-const REGION_COLORS = {
-  'Nord America':'#58A6FF', 'Europa':'#3FB950', 'Asia/Pacifico':'#D29922',
-  'Mercati Emergenti':'#DB6D28', 'Globale':'#A371F7', 'Materie prime':'#E3B341',
-  'Altro':'#8B949E'
+// Gruppi di esposizione geografica. Ogni strumento viene SCOMPOSTO in queste
+// quote (come una scheda tecnica), non assegnato a un solo gruppo.
+const GEO_GROUPS = [
+  {key:'USA',   label:'USA',                   color:'#58A6FF'},
+  {key:'EXUS',  label:'Sviluppato ex-USA',     color:'#3FB950'},
+  {key:'EM',    label:'Mercati Emergenti',     color:'#DB6D28'},
+  {key:'ALTRO', label:'Altro / non azionario', color:'#8B949E'}
+];
+// Profili di allocazione tipici per categoria di indice (percentuali approssimate).
+const GEO_PRESETS = {
+  usa:       {USA:100},
+  world:     {USA:62, EXUS:28, EM:10},   // FTSE All-World / ACWI (incl. emergenti)
+  developed: {USA:70, EXUS:30},          // MSCI World (solo sviluppati)
+  exus:      {EXUS:100},                  // Europa / Pacifico sviluppato
+  em:        {EM:100},
+  commodity: {ALTRO:100}
 };
-const REGIONS = Object.keys(REGION_COLORS);
+// Etichette per il selettore nel dettaglio.
+const GEO_PRESET_LABELS = [
+  ['auto','Automatico (dal nome)'],
+  ['usa','100% USA'],
+  ['world','Globale All-World (≈62 USA / 28 ex-USA / 10 EM)'],
+  ['developed','Sviluppato (≈70 USA / 30 ex-USA)'],
+  ['exus','100% Sviluppato ex-USA'],
+  ['em','100% Mercati Emergenti'],
+  ['commodity','Materie prime / non azionario']
+];
 
 /* ---------- helpers ---------- */
 function loadJSON(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
@@ -748,45 +768,58 @@ function yearlyChange(d){
 /* =========================================================================
    PORTFOLIO-LEVEL ANALYTICS
    ========================================================================= */
-/* Regione di esposizione = sottostante reale, NON la borsa di quotazione.
-   Priorità: override manuale → parole chiave nel nome → paese di quotazione (solo
-   per le azioni) → 'Altro' per gli ETF senza indizi (l'utente la assegna a mano). */
-function regionFromName(name){
+/* Esposizione geografica = SCOMPOSIZIONE per gruppi (USA / Sviluppato ex-USA /
+   Mercati Emergenti / Altro), come una scheda tecnica. Ogni strumento ha un
+   "profilo" di allocazione. Priorità: override manuale → casi noti → profilo dal
+   nome → tipo/borsa → 'Altro' (ETF senza indizi: profilo assegnabile a mano). */
+function normBreak(b){
+  const o={USA:0,EXUS:0,EM:0,ALTRO:0};
+  if(b)for(const k in o)o[k]=+b[k]||0;
+  const s=o.USA+o.EXUS+o.EM+o.ALTRO;
+  if(s<=0){o.ALTRO=100;return o;}
+  for(const k in o)o[k]=o[k]/s*100;   // normalizza a 100
+  return o;
+}
+function presetFromName(name){
   const n=(name||'').toUpperCase();
   const has=(...k)=>k.some(x=>n.includes(x));
-  if(has('GOLD','ORO','SILVER','ARGENT','PLATIN','PALLAD','CRUDE',' OIL','PETROL','COMMODIT','METAL','BULLION','NATURAL GAS','URANIUM','COPPER','BRENT','WTI'))return 'Materie prime';
-  if(has('EMERGING','EMERGENTI','EMERG','FRONTIER','LATIN','BRAZIL','BRASIL','CHINA A','VIETNAM','TURK','SOUTH AFRICA','SUDAFRIC'))return 'Mercati Emergenti';
-  if(has('ALL-WORLD','ALL WORLD','FTSE ALL','MSCI WORLD','ACWI','GLOBAL','WORLD','GLOBALE','DEVELOPED WORLD'))return 'Globale';
-  if(has('S&P 500','S&P500','SP500','NASDAQ','RUSSELL','DOW JONES','UNITED STATES','U.S.','USA','AMERICA','MSCI USA','NVDA','NVIDIA','TESLA','APPLE','MICROSOFT','AMAZON','ALPHABET','GOOGLE','META','NETFLIX','INTEL','ORACLE','BROADCOM'))return 'Nord America';
-  if(has('EUROPE','EUROPA','EURO STOXX','STOXX','EUROZONE','EURO ZONE','EMU','DAX','CAC','FTSE MIB','FTSE 100','IBEX','SMI','EUROPEAN'))return 'Europa';
-  if(has('ASIA','PACIFIC','PACIFICO','JAPAN','GIAPPONE','CHINA','CINA','HONG KONG','KOREA','TAIWAN','INDIA','ASEAN','AUSTRALIA','SINGAPORE','NIKKEI','TOPIX'))return 'Asia/Pacifico';
+  if(has('GOLD','ORO','SILVER','ARGENT','PLATIN','PALLAD','CRUDE',' OIL','PETROL','COMMODIT','METAL','BULLION','URANIUM','COPPER','BRENT','WTI','NATURAL GAS'))return 'commodity';
+  if(has('EMERGING','EMERGENTI','EMERG','FRONTIER','LATIN','BRAZIL','BRASIL','CHINA','CINA','INDIA','VIETNAM','TURK','SOUTH AFRICA','SUDAFRIC'))return 'em';
+  if(has('ALL-WORLD','ALL WORLD','FTSE ALL','ACWI'))return 'world';
+  if(has('MSCI WORLD','DEVELOPED WORLD','DEVELOPED MARKETS','FTSE DEVELOPED'))return 'developed';
+  if(has('S&P 500','S&P500','SP500','NASDAQ','RUSSELL','DOW JONES','UNITED STATES','U.S.','USA','MSCI USA','NVDA','NVIDIA','TESLA','APPLE','MICROSOFT','AMAZON','ALPHABET','GOOGLE','META','NETFLIX','INTEL','ORACLE','BROADCOM'))return 'usa';
+  if(has('EUROPE','EUROPA','EURO STOXX','STOXX','EUROZONE','EURO ZONE','EMU','DAX','CAC','FTSE MIB','FTSE 100','IBEX','SMI','EUROPEAN'))return 'exus';
+  if(has('JAPAN','GIAPPONE','PACIFIC','PACIFICO','ASIA','ASEAN','AUSTRALIA','SINGAPORE','NIKKEI','TOPIX'))return 'exus';  // sviluppati Asia-Pacifico
+  if(has('GLOBAL','GLOBALE','WORLD','MONDO'))return 'world';
   return null;
 }
-function regionFromSuffix(t){
-  if(t.indexOf('.')===-1)return 'Nord America';                 // ticker USA
-  if(/\.(TO|V|NE)$/.test(t))return 'Nord America';              // Canada
-  if(/\.(MI|PA|DE|AS|L|MC|BR|LS|VI|HE|ST|OL|CO|SW|IR|F|BE|DU|HM|MU|SG)$/.test(t))return 'Europa';
-  if(/\.(HK|SS|SZ|T|KS|KQ|TW|TWO|AX|SI|NZ)$/.test(t))return 'Asia/Pacifico';
-  if(/\.(SA|MX|BA|SN|IS|JK|BK|NS|BO)$/.test(t))return 'Mercati Emergenti';
-  return 'Altro';
+function presetFromSuffix(t){
+  if(t.indexOf('.')===-1)return 'usa';                                                             // USA
+  if(/\.(MI|PA|DE|AS|L|MC|BR|LS|VI|HE|ST|OL|CO|SW|IR|F|BE|DU|HM|MU|SG|TO|V|NE|AX|NZ|T)$/.test(t))return 'exus'; // sviluppati ex-USA
+  if(/\.(HK|SS|SZ|KS|KQ|TW|TWO|SI|SA|MX|BA|SN|IS|JK|BK|NS|BO)$/.test(t))return 'em';               // emergenti
+  return null;
 }
-// Casi noti dal mapping in Code.gs: regione corretta senza toccare il foglio.
-const REGION_KNOWN = {
-  'AEEM.PA':'Mercati Emergenti',   // Amundi MSCI Emerging Markets
-  'IGLN.L':'Materie prime',        // iShares Physical Gold
-  '1NVDA.MI':'Nord America'        // ETP a leva su NVIDIA
-};
-function regionOf(row){
-  if(geoOverrides[row.ticker_yf])return geoOverrides[row.ticker_yf];
-  if(REGION_KNOWN[row.ticker_yf])return REGION_KNOWN[row.ticker_yf];
-  const byName=regionFromName(row.name);
-  if(byName)return byName;
-  if(row.type==='ETC')return 'Materie prime';        // gli ETC sono quasi sempre commodity
-  if(row.type==='STK')return regionFromSuffix(row.ticker_yf);
-  return 'Altro';                                     // ETF senza indizi: assegnabile a mano
+// Casi noti dal mapping in Code.gs: profilo corretto senza toccare il foglio.
+const GEO_KNOWN = { 'AEEM.PA':'em', 'IGLN.L':'commodity', '1NVDA.MI':'usa' };
+// Restituisce la chiave-profilo automatica (senza override), o null se ignoto.
+function autoPreset(row){
+  if(GEO_KNOWN[row.ticker_yf])return GEO_KNOWN[row.ticker_yf];
+  const p=presetFromName(row.name);
+  if(p)return p;
+  if(row.type==='ETC')return 'commodity';
+  if(row.type==='STK')return presetFromSuffix(row.ticker_yf);
+  return null;   // ETF senza indizi
 }
-function setRegion(ticker,region){
-  if(region&&REGIONS.includes(region))geoOverrides[ticker]=region; else delete geoOverrides[ticker];
+// Scomposizione geografica effettiva dello strumento (percentuali → 100).
+function geoBreakdownOf(row){
+  const ov=geoOverrides[row.ticker_yf];
+  const key=(ov&&ov!=='auto')?ov:autoPreset(row);
+  return normBreak(key&&GEO_PRESETS[key]);
+}
+// true se l'app non sa classificarlo (ETF ignoto, finisce in 'Altro').
+function geoUnknown(row){return !geoOverrides[row.ticker_yf] && autoPreset(row)===null}
+function setGeoProfile(ticker,key){
+  if(key&&key!=='auto'&&GEO_PRESETS[key])geoOverrides[ticker]=key; else delete geoOverrides[ticker];
   saveJSON(LS.geo,geoOverrides);
 }
 function betaOf(d){
@@ -798,7 +831,9 @@ function betaOf(d){
 }
 function portfolioStats(){
   let total=0,invested=0,dailyPL=0;
-  const byType={ETF:0,ETC:0,STK:0}, byRegion={};
+  const byType={ETF:0,ETC:0,STK:0};
+  const byGroup={USA:0,EXUS:0,EM:0,ALTRO:0};   // € esposti per gruppo geografico
+  let geoUnknownN=0;
   let wBeta=0, wVol=0;
   const positions=[];
   for(const row of portfolio){
@@ -808,7 +843,10 @@ function portfolioStats(){
     total+=m.value;invested+=m.invested;
     if(m.daily!=null&&m.cur!=null)dailyPL+=m.value*(m.daily/100);
     byType[row.type]=(byType[row.type]||0)+m.value;
-    const g=regionOf(row);if(!byRegion[g])byRegion[g]={value:0,count:0};byRegion[g].value+=m.value;byRegion[g].count++;
+    // scomposizione geografica pesata per valore
+    const bd=geoBreakdownOf(row);
+    for(const k in byGroup)byGroup[k]+=m.value*(bd[k]||0)/100;
+    if(geoUnknown(row))geoUnknownN++;
     const beta=betaOf(d);
     const dvol=(d.atr&&d.price)?(d.atr/d.price):0.015;
     positions.push({row,m,value:m.value,beta,dvol});
@@ -820,7 +858,7 @@ function portfolioStats(){
   const var95=total*wVol*1.645;
   // concentration
   const conc=positions.map(p=>({name:p.row.name,pct:total?p.value/total*100:0})).sort((a,b)=>b.pct-a.pct);
-  return {total,invested,pl,plpct,dailyPL,dailyPct,byType,byRegion,wBeta,var95,conc,positions};
+  return {total,invested,pl,plpct,dailyPL,dailyPct,byType,byGroup,geoUnknownN,wBeta,var95,conc,positions};
 }
 function fearGreed(){
   // avg RSI + avg distance from 52w high
@@ -925,42 +963,37 @@ function renderVar(){
 function renderGeo(){
   const card=$('#geoCard');if(!card)return;
   const s=portfolioStats();
-  const regions=Object.keys(s.byRegion).sort((a,b)=>s.byRegion[b].value-s.byRegion[a].value);
-  if(!regions.length||!s.total){
+  if(!s.total){
     card.innerHTML=`<div class="card"><div class="label">🌍 Esposizione geografica</div>
       <div class="muted" style="font-size:12px;margin-top:6px">Dati non ancora disponibili.</div></div>`;
     return;
   }
-  // barra impilata
-  let bar='';
-  regions.forEach(r=>{
-    const p=s.byRegion[r].value/s.total*100;
-    if(p>0)bar+=`<span title="${r} ${fmtNum(p,1)}%" style="width:${p}%;background:${REGION_COLORS[r]||'#8B949E'};display:inline-block;height:100%"></span>`;
-  });
+  const groups=GEO_GROUPS.map(g=>({...g,value:s.byGroup[g.key]||0,pct:(s.byGroup[g.key]||0)/s.total*100}))
+                         .filter(g=>g.value>0.005);
+  // barra impilata (ordine fisso USA → ex-USA → EM → Altro)
+  let bar=groups.map(g=>`<span title="${g.label} ${fmtNum(g.pct,1)}%" style="width:${g.pct}%;background:${g.color};display:inline-block;height:100%"></span>`).join('');
   // righe dettaglio
-  const rows=regions.map(r=>{
-    const o=s.byRegion[r], p=s.total?o.value/s.total*100:0;
-    return `<div class="row" style="margin-top:8px;align-items:center">
+  const rows=groups.map(g=>`<div class="row" style="margin-top:8px;align-items:center">
       <div style="display:flex;align-items:center;gap:8px;min-width:0">
-        <span class="dot" style="background:${REGION_COLORS[r]||'#8B949E'};flex:0 0 auto"></span>
-        <span style="font-weight:600">${r}</span>
-        <span class="muted" style="font-size:11px">· ${o.count} ${o.count===1?'strumento':'strumenti'}</span>
+        <span class="dot" style="background:${g.color};flex:0 0 auto"></span>
+        <span style="font-weight:600">${g.label}</span>
       </div>
       <div style="text-align:right;flex:0 0 auto">
-        <span style="font-weight:700">${fmtNum(p,1)}%</span>
-        <span class="muted" style="font-size:11.5px"> · ${fmtEur(o.value)}</span>
+        <span style="font-weight:700">${fmtNum(g.pct,1)}%</span>
+        <span class="muted" style="font-size:11.5px"> · ${fmtEur(g.value)}</span>
       </div>
-    </div>`;
-  }).join('');
-  // concentrazione: prima regione molto dominante
-  const top=regions[0], topPct=s.byRegion[top].value/s.total*100;
-  const warn=topPct>60?`<div class="neg" style="margin-top:10px;font-size:12px">⚠️ Forte concentrazione su ${top} (${fmtNum(topPct,0)}%): diversificazione geografica limitata.</div>`:'';
-  const altro=s.byRegion['Altro']?`<div class="muted" style="margin-top:8px;font-size:11px">Alcuni strumenti sono in "Altro": aprili dal dettaglio per assegnare la regione corretta.</div>`:'';
+    </div>`).join('');
+  // concentrazione su un singolo gruppo
+  const eq=groups.filter(g=>g.key!=='ALTRO');
+  const topEq=eq.slice().sort((a,b)=>b.pct-a.pct)[0];
+  const warn=(topEq&&topEq.pct>70)?`<div class="neg" style="margin-top:10px;font-size:12px">⚠️ Forte concentrazione su ${topEq.label} (${fmtNum(topEq.pct,0)}%): diversificazione geografica limitata.</div>`:'';
+  const unk=s.geoUnknownN?`<div class="muted" style="margin-top:8px;font-size:11px">${s.geoUnknownN} strumento/i senza profilo: aprili dal dettaglio e imposta l'allocazione corretta.</div>`:'';
   card.innerHTML=`<div class="card">
     <div class="label">🌍 Esposizione geografica</div>
     <div class="bar" style="height:12px;display:flex;margin-top:10px;border-radius:6px;overflow:hidden">${bar}</div>
     ${rows}
-    ${warn}${altro}
+    ${warn}${unk}
+    <div class="muted" style="font-size:10.5px;margin-top:8px">Stime su profili di indice tipici (scheda tecnica), non dati live. Modificabili dal dettaglio di ogni strumento.</div>
   </div>`;
 }
 
@@ -1234,16 +1267,8 @@ function openDetail(ticker){
         <div><div class="label">P/L totale</div><div class="${clsSign(m.pl)}" style="font-weight:700">${fmtEur(m.pl)} (${fmtPct(m.plpct)})</div></div>
       </div>
 
-      <div class="section-title">Area geografica</div>
-      <div class="card">
-        <div class="row" style="align-items:center">
-          <div style="font-weight:600">Regione di esposizione</div>
-          <select id="geoSelect" class="chip" style="border:none;padding:6px 10px">
-            ${REGIONS.map(r=>`<option value="${r}" ${r===regionOf(row)?'selected':''}>${r}</option>`).join('')}
-          </select>
-        </div>
-        <small class="muted">${geoOverrides[row.ticker_yf]?'Impostata manualmente.':'Classificazione automatica dal nome.'} Usata per l'esposizione geografica del portafoglio.</small>
-      </div>
+      <div class="section-title">Esposizione geografica</div>
+      ${geoDetailHtml(row)}
 
       ${row.notes?`<div class="section-title">Note</div><div class="card"><div style="font-size:13.5px">${row.notes}</div></div>`:''}
 
@@ -1256,7 +1281,7 @@ function openDetail(ticker){
   $('#tgSma').onclick=function(){detailState.sma=!detailState.sma;this.classList.toggle('on');drawDetailChart()};
   $('#tgEma').onclick=function(){detailState.ema=!detailState.ema;this.classList.toggle('on');drawDetailChart()};
   $('#tgBoll').onclick=function(){detailState.boll=!detailState.boll;this.classList.toggle('on');drawDetailChart()};
-  $('#geoSelect').onchange=function(){setRegion(ticker,this.value);renderGeo();toast('Regione aggiornata: '+this.value)};
+  bindGeoSelect(ticker);
   renderMacdMini(d);
   renderDetailAlerts(ticker);
   drawDetailChart();
@@ -1264,6 +1289,34 @@ function openDetail(ticker){
 function closeDetail(){$('#detail').classList.remove('open');if(detailState.chart){detailState.chart.destroy();detailState.chart=null}}
 
 function indBox(k,v,sub){return `<div class="ind-box"><div class="k">${k}</div><div class="v">${v}</div><div class="sub">${sub||''}</div></div>`}
+function geoDetailHtml(row){
+  const cur=geoOverrides[row.ticker_yf]||'auto';
+  const bd=geoBreakdownOf(row);
+  const segs=GEO_GROUPS.filter(g=>bd[g.key]>0.005).map(g=>`<span title="${g.label} ${fmtNum(bd[g.key],0)}%" style="width:${bd[g.key]}%;background:${g.color};display:inline-block;height:100%"></span>`).join('');
+  const legend=GEO_GROUPS.filter(g=>bd[g.key]>0.005).map(g=>`<span style="display:inline-flex;align-items:center;gap:5px"><span class="dot" style="background:${g.color}"></span>${g.label} ${fmtNum(bd[g.key],0)}%</span>`).join('');
+  const opts=GEO_PRESET_LABELS.map(([k,lbl])=>`<option value="${k}" ${k===cur?'selected':''}>${lbl}</option>`).join('');
+  const src=(cur==='auto')?(autoPreset(row)?'Profilo automatico (dal nome/borsa).':'Non classificato: scegli un profilo.'):'Profilo impostato manualmente.';
+  return `<div class="card" data-geocard="1">
+    <div class="row" style="align-items:center">
+      <div style="font-weight:600">Profilo di allocazione</div>
+      <select id="geoSelect" class="chip" style="border:none;padding:6px 10px;max-width:60%">${opts}</select>
+    </div>
+    <div class="bar" style="height:10px;display:flex;margin-top:10px;border-radius:5px;overflow:hidden">${segs}</div>
+    <div style="display:flex;gap:12px;margin-top:8px;font-size:11.5px;flex-wrap:wrap">${legend}</div>
+    <small class="muted" style="display:block;margin-top:8px">${src} Percentuali da profili di indice tipici, non dati live.</small>
+  </div>`;
+}
+function bindGeoSelect(ticker){
+  const sel=$('#geoSelect');if(!sel)return;
+  sel.onchange=function(){
+    setGeoProfile(ticker,this.value);
+    renderGeo();                                  // aggiorna la card in home
+    const r=priceData[ticker]&&priceData[ticker].row;
+    const wrap=this.closest('[data-geocard]');
+    if(r&&wrap){wrap.outerHTML=geoDetailHtml(r);bindGeoSelect(ticker);}  // ridisegna la scomposizione
+    toast('Profilo geografico aggiornato');
+  };
+}
 function rsiZone(r){if(r==null)return '';if(r<30)return '🟢 ipervenduto';if(r<50)return 'debole';if(r<70)return 'forte';return '🔴 ipercomprato'}
 function smaStatus(d){if(d.sma50==null||d.sma200==null)return '—';return fmtNum(d.sma50,1)+' / '+fmtNum(d.sma200,1)}
 function range52Html(d,m){
