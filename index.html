@@ -308,6 +308,7 @@ let geoOverrides = loadJSON(LS.geo,{});   // ticker_yf -> regione scelta a mano
 let currentSort = 'value';
 let strongFilter = false;
 let autoTimer = null;
+let pricesLoaded = false;   // true dopo il primo fetch pieno riuscito in QUESTA sessione
 
 // Gruppi di esposizione geografica. Ogni strumento viene SCOMPOSTO in queste
 // quote (come una scheda tecnica), non assegnato a un solo gruppo.
@@ -620,10 +621,13 @@ function fmtClock(ts){return new Date(ts).toLocaleTimeString('it-IT',{hour:'2-di
 async function refreshPrices(force){
   if(!portfolio.length)return;
   hydrateFromCache();           // parti dall'ultimo dato buono, mai da zero
-  // Throttle 5 min: sotto soglia non si contatta la rete.
+  // Throttle 5 min: sotto soglia non si contatta la rete. MA solo se in questa
+  // sessione abbiamo già i dati completi (indicatori) in memoria: dopo un reload
+  // la cache ha solo lo snapshot prezzi, quindi va comunque fatto un fetch pieno
+  // per ricalcolare gli indicatori (Buy Score, RSI, ecc.).
   const ts=+localStorage.getItem(LS.pricesTs)||0;
   const since=Date.now()-ts;
-  if(ts && since<MIN_REFRESH_MS){
+  if(pricesLoaded && ts && since<MIN_REFRESH_MS){
     if(force){
       const left=Math.max(1,Math.ceil((MIN_REFRESH_MS-since)/60000));
       toast(`Già aggiornato alle ${fmtClock(ts)} · prossimo tra ${left} min`);
@@ -655,7 +659,7 @@ async function refreshPrices(force){
     }
   });
   saveJSON(LS.prices,cache);
-  if(ok>0)localStorage.setItem(LS.pricesTs,Date.now());
+  if(ok>0){pricesLoaded=true;localStorage.setItem(LS.pricesTs,Date.now());}
   // Banner se nessun prezzo si è aggiornato in questo giro.
   showBanner(ok===0 && portfolio.length>0);
   renderAll();
